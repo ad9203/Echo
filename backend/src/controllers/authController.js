@@ -74,6 +74,17 @@ export const register = async (req, res, next) => {
       });
     }
 
+    const hasSmtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+
+    // If no real SMTP service configured in .env, auto-verify user immediately
+    if (!hasSmtpConfigured) {
+      existingUser.isVerified = true;
+      existingUser.otp = undefined;
+      existingUser.otpExpires = undefined;
+      await existingUser.save();
+      return sendTokenResponse(existingUser, 201, res);
+    }
+
     // Send verification email via Nodemailer
     await sendOtpEmail({
       to: cleanEmail,
@@ -248,6 +259,15 @@ export const login = async (req, res, next) => {
 
     // If user has not verified their email via OTP yet
     if (!user.isVerified) {
+      const hasSmtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+      if (!hasSmtpConfigured) {
+        user.isVerified = true;
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        await user.save();
+        return sendTokenResponse(user, 200, res);
+      }
+
       const otp = generate6DigitOtp();
       user.otp = otp;
       user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);

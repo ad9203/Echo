@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 
 const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
-  const { user, login, register, verifyOtp, resendOtp, logout, isAuthenticated } = useAuth();
+  const { user, login, demoLogin, register, verifyOtp, resendOtp, logout, isAuthenticated } = useAuth();
 
   const [mode, setMode] = useState(initialMode); // "login", "register", "otp", "profile"
   const [name, setName] = useState("");
@@ -97,6 +97,11 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
           setOtpDigits(["", "", "", "", "", ""]);
           setSuccessMsg(`We sent a 6-digit verification code to ${email}`);
           setTimeout(() => otpInputsRef.current[0]?.focus(), 150);
+        } else {
+          setSuccessMsg("Welcome! Account created successfully.");
+          setTimeout(() => {
+            onClose();
+          }, 400);
         }
       } catch (err) {
         setErrorMsg(err.message || "Registration failed. Please check credentials.");
@@ -210,6 +215,23 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
       onClose();
     } catch (err) {
       setErrorMsg(err.message || "Could not sign out.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDemoAccess = async () => {
+    setErrorMsg("");
+    setSuccessMsg("");
+    setIsSubmitting(true);
+    try {
+      await demoLogin();
+      setSuccessMsg("Welcome to Demo Mode! Entering workspace...");
+      setTimeout(() => {
+        onClose();
+      }, 400);
+    } catch (err) {
+      setErrorMsg(err.message || "Could not launch demo account.");
     } finally {
       setIsSubmitting(false);
     }
@@ -513,6 +535,23 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
               >
                 {mode === "register" ? <UserPlus size={16} /> : <LogIn size={16} />}
                 <span>{mode === "register" ? "Send Verification Code" : "Sign In"}</span>
+              </button>
+
+              {/* Instant 1-Click Demo Account Access */}
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-slate-200 dark:border-white/10"></div>
+                <span className="flex-shrink mx-3 text-[10px] uppercase font-bold text-slate-400">or</span>
+                <div className="flex-grow border-t border-slate-200 dark:border-white/10"></div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDemoAccess}
+                disabled={isSubmitting}
+                className="w-full py-2.5 rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-300 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-sm"
+              >
+                <Sparkles size={15} />
+                <span>Instant Demo Access (No Setup Required)</span>
               </button>
             </form>
 

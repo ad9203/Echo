@@ -9,11 +9,15 @@ export const sendTokenResponse = (user, statusCode, res) => {
     }
   );
 
+  // Modern browsers require SameSite=None and Secure=true for cross-site cookies
+  // (e.g. frontend on vercel.app, backend on onrender.com)
+  const isSecure = process.env.NODE_ENV === "production" || !process.env.CLIENT_URL?.includes("localhost");
+
   const cookieOptions = {
     expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    secure: isSecure,
+    sameSite: isSecure ? "none" : "lax",
   };
 
   res.status(statusCode).cookie("token", token, cookieOptions).json({

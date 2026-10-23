@@ -17,7 +17,10 @@ export const AuthProvider = ({ children }) => {
           setUser(data.user);
         }
       } catch (err) {
-        // Not logged in or expired; attempt guest auto-login or remain guest
+        // Clear invalid token if session check fails
+        try {
+          localStorage.removeItem("echo_auth_token");
+        } catch (e) {}
         console.info("[Auth] No active session. Ready for login or guest onboarding.");
       } finally {
         setLoading(false);
@@ -31,10 +34,32 @@ export const AuthProvider = ({ children }) => {
     setError(null);
     try {
       const data = await api.login({ email, password });
-      setUser(data.user);
+      if (data.token) {
+        localStorage.setItem("echo_auth_token", data.token);
+      }
+      if (data.user) {
+        setUser(data.user);
+      }
       return data.user;
     } catch (err) {
       setError(err.message || "Failed to log in");
+      throw err;
+    }
+  };
+
+  const demoLogin = async () => {
+    setError(null);
+    try {
+      const data = await api.demoLogin();
+      if (data.token) {
+        localStorage.setItem("echo_auth_token", data.token);
+      }
+      if (data.user) {
+        setUser(data.user);
+      }
+      return data.user;
+    } catch (err) {
+      setError(err.message || "Failed to launch demo account");
       throw err;
     }
   };
@@ -43,6 +68,13 @@ export const AuthProvider = ({ children }) => {
     setError(null);
     try {
       const data = await api.register({ name, email, password });
+      // If server returned token immediately (auto-verified when SMTP is absent)
+      if (data.token) {
+        localStorage.setItem("echo_auth_token", data.token);
+      }
+      if (data.user) {
+        setUser(data.user);
+      }
       return data;
     } catch (err) {
       setError(err.message || "Failed to register");
@@ -54,6 +86,9 @@ export const AuthProvider = ({ children }) => {
     setError(null);
     try {
       const data = await api.verifyOtp({ email, otp });
+      if (data.token) {
+        localStorage.setItem("echo_auth_token", data.token);
+      }
       if (data.success && data.user) {
         setUser(data.user);
         return data.user;
@@ -82,6 +117,9 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.warn("Logout error:", err);
     } finally {
+      try {
+        localStorage.removeItem("echo_auth_token");
+      } catch (e) {}
       setUser(null);
     }
   };
@@ -94,6 +132,7 @@ export const AuthProvider = ({ children }) => {
         error,
         isAuthenticated: !!user,
         login,
+        demoLogin,
         register,
         verifyOtp,
         resendOtp,

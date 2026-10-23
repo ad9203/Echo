@@ -2,7 +2,7 @@ import nodemailer from "nodemailer";
 
 let transporter = null;
 
-async function getTransporter() {
+function getTransporter() {
   if (transporter) return transporter;
 
   // 1. Check for configured SMTP credentials in .env
@@ -35,41 +35,27 @@ async function getTransporter() {
     return transporter;
   }
 
-  // 2. Fallback to Nodemailer Ethereal test account or local mock
-  try {
-    const testAccount = await nodemailer.createTestAccount();
-    transporter = nodemailer.createTransport({
-      host: "smtp.ethereal.email",
-      port: 587,
-      secure: false,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
-      },
-    });
-    console.info(`[Echo Mail] Initialized Ethereal test account: ${testAccount.user}`);
-  } catch (err) {
-    console.warn("[Echo Mail] Could not create Ethereal account, using console logging fallback:", err.message);
-    transporter = {
-      sendMail: async (options) => {
-        console.log("==================== [ECHO EMAIL LOG] ====================");
-        console.log(`To: ${options.to}`);
-        console.log(`Subject: ${options.subject}`);
-        console.log(`Body:\n${options.text || options.html}`);
-        console.log("==========================================================");
-        return { messageId: "mock-" + Date.now() };
-      },
-    };
-  }
+  // 2. Fallback logger when SMTP credentials are not configured in environment
+  // (Prevents socket hanging on cloud hosts like Render free tier which block port 587)
+  transporter = {
+    sendMail: async (options) => {
+      console.log("==================== [ECHO EMAIL LOG] ====================");
+      console.log(`To: ${options.to}`);
+      console.log(`Subject: ${options.subject}`);
+      console.log(`Body:\n${options.text || options.html}`);
+      console.log("==========================================================");
+      return { messageId: "console-mock-" + Date.now() };
+    },
+  };
 
   return transporter;
 }
 
 /**
- * Sends a stylized 6-digit OTP verification email
+ * Sends a stylized 6-digit OTP verification email with safety timeout
  */
 export async function sendOtpEmail({ to, name = "Echo User", otp }) {
-  const mailTransporter = await getTransporter();
+  const mailTransporter = getTransporter();
 
   const htmlContent = `
 <!DOCTYPE html>
@@ -95,7 +81,7 @@ export async function sendOtpEmail({ to, name = "Echo User", otp }) {
   <div class="card">
     <div class="header">
       <div class="brand">Echo</div>
-      <div class="subtitle">NOTES TO BUILD U NOTES</div>
+      <div class="subtitle">SPEAK. STRUCTURE. ORGANIZE.</div>
     </div>
     
     <div class="title">Verify your email address</div>
@@ -133,19 +119,18 @@ export async function sendOtpEmail({ to, name = "Echo User", otp }) {
   };
 
   try {
-    const info = await mailTransporter.sendMail(mailOptions);
+    // 5-second timeout guard to ensure web requests never hang indefinitely
+    const sendPromise = mailTransporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Email dispatch timed out after 5s")), 5000)
+    );
+
+    const info = await Promise.race([sendPromise, timeoutPromise]);
     console.info(`[Echo Mail] Verification OTP email dispatched to ${to} (MessageId: ${info.messageId || "mock"})`);
-    if (nodemailer.getTestMessageUrl && info) {
-      const previewUrl = nodemailer.getTestMessageUrl(info);
-      if (previewUrl) {
-        console.info(`[Echo Mail] Preview URL: ${previewUrl}`);
-      }
-    }
     return { success: true, messageId: info.messageId };
   } catch (err) {
-    console.error("[Echo Mail] Send failed:", err.message);
-    // Don't crash registration if email server fails; log OTP in console so user can verify in dev
-    console.log(`[Echo Mail DEV FALLBACK] User: ${to} | Verification OTP: ${otp}`);
+    console.warn(`[Echo Mail Warning] Dispatch to ${to} bypassed: ${err.message}`);
+    console.log(`[Echo Mail Fallback] User: ${to} | Verification OTP: ${otp}`);
     return { success: false, error: err.message, devOtp: otp };
   }
 }
