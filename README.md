@@ -2,6 +2,8 @@
 
 # 🎙️ Echo — AI Notes App
 
+link - https://frontend-seven-pink-67.vercel.app/
+
 **A full-stack, Notion-inspired block editor enriched with Gemini-powered AI voice-to-structured-notes dictation and glassmorphic UI.**
 
 [![React](https://img.shields.io/badge/Frontend-React_19_%7C_Vite_%7C_Tailwind_CSS-blue.svg)](https://react.dev/)
