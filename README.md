@@ -123,8 +123,8 @@ Make sure you have installed:
 
 #### 1. Clone the repository
 ```bash
-git clone https://github.com/<your-username>/Notes-App.git
-cd Notes-App
+git clone https://github.com/ad9203/Echo.git
+cd Echo
 ```
 
 #### 2. Install all dependencies
@@ -230,7 +230,7 @@ npm run dev
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com).
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/ad9203/Echo/issues).
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
