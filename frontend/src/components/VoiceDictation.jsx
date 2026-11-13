@@ -265,33 +265,84 @@ const VoiceDictation = ({ editor, onDictationComplete, dismissTrigger }) => {
         console.info("[Echo Voice] Formatting speech transcript locally");
         const clean = transcriptText.trim();
         const words = clean.split(/\s+/);
-        const titleCandidate = words.slice(0, 6).join(" ").replace(/[.,;!?]+$/, "");
+        const titleCandidate = words.slice(0, 5).join(" ").replace(/[.,;!?]+$/, "");
         const title = titleCandidate.charAt(0).toUpperCase() + titleCandidate.slice(1);
 
         const sentences = clean.split(/(?<=[.?!])\s+/).map((s) => s.trim()).filter(Boolean);
-        const actionPattern = /^(todo|need to|have to|must|please|remember to|set up|create|build|implement|fix|deploy|check|buy|call|schedule|review)/i;
+        const actionPattern = /^(todo|need to|have to|must|please|remember to|set up|create|build|implement|fix|deploy|check|buy|call|schedule|review|follow up)/i;
+        const highlightPattern = /(important|critical|deadline|urgent|key|priority|launch|target|goal|must not|revenue|budget|before|by \w+day)/i;
 
         const localBlocks = [];
+        const mdLines = [];
+
+        const keyPoints = [];
+        const actionItems = [];
+        const notes = [];
+
         for (const sentence of sentences) {
           if (actionPattern.test(sentence)) {
-            localBlocks.push({
-              type: "checkListItem",
-              props: { checked: false },
-              content: [{ type: "text", text: sentence }],
-            });
+            actionItems.push(sentence);
+          } else if (highlightPattern.test(sentence)) {
+            keyPoints.push(sentence);
           } else {
-            localBlocks.push({
-              type: "bulletListItem",
-              content: [{ type: "text", text: sentence }],
-            });
+            notes.push(sentence);
           }
         }
 
-        if (localBlocks.length === 0) {
+        if (keyPoints.length > 0) {
           localBlocks.push({
-            type: "paragraph",
-            content: [{ type: "text", text: clean }],
+            type: "heading",
+            props: { level: 2 },
+            content: [{ type: "text", text: "📌 Key Highlights", styles: {} }],
           });
+          mdLines.push("## 📌 Key Highlights");
+          for (const pt of keyPoints) {
+            const pWords = pt.split(/\s+/);
+            const lead = pWords.slice(0, 3).join(" ");
+            const rest = pWords.slice(3).join(" ");
+            localBlocks.push({
+              type: "bulletListItem",
+              content: [
+                { type: "text", text: lead + " ", styles: { bold: true } },
+                { type: "text", text: rest, styles: {} },
+              ],
+            });
+            mdLines.push(`- **${lead}** ${rest}`);
+          }
+        }
+
+        if (actionItems.length > 0) {
+          localBlocks.push({
+            type: "heading",
+            props: { level: 2 },
+            content: [{ type: "text", text: "✅ Action Items", styles: {} }],
+          });
+          mdLines.push("## ✅ Action Items");
+          for (const item of actionItems) {
+            localBlocks.push({
+              type: "checkListItem",
+              props: { checked: false },
+              content: [{ type: "text", text: item, styles: {} }],
+            });
+            mdLines.push(`- [ ] ${item}`);
+          }
+        }
+
+        if (notes.length > 0 || (keyPoints.length === 0 && actionItems.length === 0)) {
+          localBlocks.push({
+            type: "heading",
+            props: { level: 2 },
+            content: [{ type: "text", text: "📝 Notes & Details", styles: {} }],
+          });
+          mdLines.push("## 📝 Notes & Details");
+          const items = notes.length > 0 ? notes : [clean];
+          for (const n of items) {
+            localBlocks.push({
+              type: "bulletListItem",
+              content: [{ type: "text", text: n, styles: {} }],
+            });
+            mdLines.push(`- ${n}`);
+          }
         }
 
         setLastGeneratedTitle(title);
@@ -301,7 +352,7 @@ const VoiceDictation = ({ editor, onDictationComplete, dismissTrigger }) => {
             title,
             blocks: localBlocks,
             rawTranscript: clean,
-            cleanedMarkdown: localBlocks.map((b) => `- ${b.content?.[0]?.text || ""}`).join("\n"),
+            cleanedMarkdown: mdLines.join("\n"),
           });
         }
       } else {

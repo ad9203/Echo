@@ -1,17 +1,17 @@
 import { markdownToBlocks } from "../utils/blockConverter.js";
 
-// Google Gemini Candidate Models (ordered by availability and reliability)
+// Google Gemini Candidate Models (ordered by speed, reliability, and multimodal availability)
 const GEMINI_MODELS = [
   "gemini-3.5-flash-lite",
-  "gemini-3.5-flash",
+  "gemini-3.5-transcribe",
   "gemini-flash-lite-latest",
+  "gemini-3.5-flash",
   "gemini-flash-latest",
 ];
 
 /**
- * Intelligent Speech Structurer (Zero External Dependency)
- * Converts raw speech into an organized note with Title, Headings, Checklists, and Bullets.
- * Guarantees that body blocks and title are NEVER empty.
+ * Intelligent Speech Structurer (Zero External Dependency Fallback)
+ * Converts raw speech into an organized note with Title, Key Highlights, Checklists, and Notes.
  */
 function localFormatSpeech(transcript = "") {
   const clean = transcript.trim();
@@ -29,67 +29,82 @@ function localFormatSpeech(transcript = "") {
     };
   }
 
-  // 1. Generate Title (first 4-7 words, capitalized)
+  // 1. Generate Title (first 4-6 meaningful words)
   const words = clean.split(/\s+/);
-  const titleCandidate = words.slice(0, 6).join(" ").replace(/[.,;!?]+$/, "");
+  const titleCandidate = words.slice(0, 5).join(" ").replace(/[.,;!?]+$/, "");
   const title = titleCandidate.charAt(0).toUpperCase() + titleCandidate.slice(1);
 
-  // 2. Parse sentences into logical block types
+  // 2. Parse sentences into Key Highlights, Action Items, and Notes
   const sentences = clean
     .split(/(?<=[.?!])\s+/)
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const blocks = [];
-  const actionPattern = /^(todo|need to|have to|must|please|remember to|set up|create|build|implement|fix|deploy|check|buy|call|schedule|review)/i;
+  const actionPattern = /^(todo|need to|have to|must|please|remember to|set up|create|build|implement|fix|deploy|check|buy|call|schedule|review|follow up)/i;
+  const highlightPattern = /(important|critical|deadline|urgent|key|priority|launch|target|goal|must not|revenue|budget|before|by \w+day)/i;
 
-  // Header block
-  blocks.push({
-    type: "heading",
-    props: { level: 2 },
-    content: [{ type: "text", text: title }],
-  });
-
-  const mdLines = [`## ${title}`];
+  const keyPoints = [];
+  const actionItems = [];
+  const notes = [];
 
   for (const sentence of sentences) {
     if (actionPattern.test(sentence)) {
-      blocks.push({
-        type: "checkListItem",
-        props: { checked: false },
-        content: [{ type: "text", text: sentence }],
-      });
-      mdLines.push(`- [ ] ${sentence}`);
+      actionItems.push(sentence);
+    } else if (highlightPattern.test(sentence)) {
+      keyPoints.push(sentence);
     } else {
-      blocks.push({
-        type: "bulletListItem",
-        content: [{ type: "text", text: sentence }],
-      });
-      mdLines.push(`- ${sentence}`);
+      notes.push(sentence);
     }
   }
 
-  // Fallback: If blocks only has heading, add paragraph with full speech
-  if (blocks.length <= 1) {
-    blocks.push({
-      type: "paragraph",
-      content: [{ type: "text", text: clean }],
-    });
-    mdLines.push(clean);
+  const mdLines = [];
+
+  // Key Highlights Section
+  if (keyPoints.length > 0) {
+    mdLines.push("## 📌 Key Highlights");
+    for (const point of keyPoints) {
+      // Bold the first 2-3 words as a topic lead-in
+      const pWords = point.split(/\s+/);
+      const lead = pWords.slice(0, 3).join(" ");
+      const rest = pWords.slice(3).join(" ");
+      mdLines.push(`- **${lead}** ${rest}`);
+    }
+    mdLines.push("");
   }
+
+  // Action Items Section (Checklists)
+  if (actionItems.length > 0) {
+    mdLines.push("## ✅ Action Items");
+    for (const item of actionItems) {
+      mdLines.push(`- [ ] ${item}`);
+    }
+    mdLines.push("");
+  }
+
+  // General Notes Section
+  if (notes.length > 0 || (keyPoints.length === 0 && actionItems.length === 0)) {
+    mdLines.push("## 📝 Notes & Details");
+    const items = notes.length > 0 ? notes : [clean];
+    for (const n of items) {
+      mdLines.push(`- ${n}`);
+    }
+  }
+
+  const cleanedMarkdown = mdLines.join("\n").trim();
+  const blocks = markdownToBlocks(cleanedMarkdown);
 
   return {
     title,
     rawTranscript: clean,
-    cleanedMarkdown: mdLines.join("\n"),
+    cleanedMarkdown,
     blocks,
   };
 }
 
-// Call Google Gemini API
+// Call Google Gemini API with generous timeout
 async function callGemini(modelName, apiKey, parts) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 6000);
+  const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout for multimodal audio processing
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
   const fetchRes = await fetch(url, {
@@ -138,7 +153,7 @@ async function callGroq(apiKey, prompt) {
       messages: [
         {
           role: "system",
-          content: "You are Echo AI note-taking assistant. Return strictly JSON with: { title: string, cleanedMarkdown: string, blocks: array }",
+          content: "You are Echo AI note-taking assistant. Return strictly JSON with: { title: string, cleanedMarkdown: string, rawTranscript: string }",
         },
         { role: "user", content: prompt },
       ],
@@ -170,7 +185,7 @@ async function callOpenAI(apiKey, prompt) {
       messages: [
         {
           role: "system",
-          content: "You are Echo AI note-taking assistant. Return strictly JSON with: { title: string, cleanedMarkdown: string, blocks: array }",
+          content: "You are Echo AI note-taking assistant. Return strictly JSON with: { title: string, cleanedMarkdown: string, rawTranscript: string }",
         },
         { role: "user", content: prompt },
       ],
@@ -187,7 +202,7 @@ async function callOpenAI(apiKey, prompt) {
 
 // @desc    Voice dictation endpoint with multi-model fallback and zero-failure guarantee
 // @route   POST /api/notes/dictate
-// @access  Private
+// @access  Private / Public Demo
 export const dictateSpeech = async (req, res) => {
   try {
     const audioFile = req.file;
@@ -201,88 +216,86 @@ export const dictateSpeech = async (req, res) => {
     }
 
     const systemInstruction = `
-You are "Echo", an intelligent AI note-taking assistant.
-Your task is to take the user's speech and convert it into a well-structured document note with BOTH a Title AND a complete Body.
+You are "Echo", a world-class AI executive assistant and intelligent note-taker.
+Your mission is to take raw spoken thoughts (audio or transcript) and convert them into a clean, comprehensive, highly structured Notion-style document note.
 
-CRITICAL RULES:
-1. NEVER RETURN AN EMPTY BODY. All facts, instructions, tasks, and ideas in the speech must appear in the body blocks.
-2. TITLE: Extract a concise, meaningful title (3 to 6 words).
-3. BODY BLOCKS:
-   - Use 'heading' (level 2) for main sections.
-   - Use 'checkListItem' (props: { checked: false }) for tasks, to-dos, or action items.
-   - Use 'bulletListItem' for facts, details, and ideas.
-   - Use 'paragraph' for descriptions.
-4. Clean verbal filler words ("um", "uh", "like", "you know"), but keep all technical terms, numbers, and instructions.
+CORE DIRECTIVES:
+1. ACCURACY & COMPLETENESS:
+   - Capture every single fact, number, technical term, project name, date, deadline, person, and instruction accurately.
+   - Strip out conversational filler words ("um", "uh", "you know", "like", "sort of", "basically", "so yeah").
+   - Do NOT omit important context or summarize so aggressively that details are lost.
 
-OUTPUT FORMAT (Valid JSON):
+2. NOTE IMPORTANT POINTS & KEY HIGHLIGHTS:
+   - Always include a dedicated section: "## 📌 Key Highlights" or "## 💡 Core Takeaways".
+   - Highlight critical metrics, deadlines, decisions, and key facts using **bold** keywords (e.g., "- **Deadline:** Launch scheduled for **Friday 5:00 PM**").
+
+3. ACTION ITEMS & CHECKLISTS:
+   - Whenever any task, assignment, follow-up, reminder, or to-do is mentioned, format it as a markdown checklist item:
+     "- [ ] Deploy the payment gateway by Friday"
+     "- [ ] Review Stripe webhook logs by Wednesday"
+
+4. SECTIONS & FORMATTING:
+   - Use "## " (Level 2 Heading) for clean section dividers (e.g. "## 📌 Key Highlights", "## 📝 Discussion Details", "## ✅ Action Items").
+   - Use bullet points with bold prefixes: "- **Topic:** Detail description".
+   - If code, shell commands, or technical endpoints are mentioned, format with markdown backticks (e.g., \`npm run build\`).
+
+OUTPUT FORMAT (Return STRICT JSON only):
 {
-  "title": "Descriptive Note Title",
-  "rawTranscript": "Exact spoken text",
-  "cleanedMarkdown": "Markdown with heading and bullet/checklist items",
-  "blocks": [
-    { "type": "heading", "props": { "level": 2 }, "content": [{ "type": "text", "text": "Heading" }] },
-    { "type": "checkListItem", "props": { "checked": false }, "content": [{ "type": "text", "text": "Task item" }] },
-    { "type": "bulletListItem", "content": [{ "type": "text", "text": "Detail point" }] }
-  ]
+  "title": "Concise Descriptive Title (3 to 6 words)",
+  "rawTranscript": "Accurate spoken transcript",
+  "cleanedMarkdown": "Full formatted markdown note containing headings, bold key points, bullet lists, and checklists"
 }
 `;
 
     let responseText = null;
     let modelUsed = null;
-
-    // --- Provider 1: Direct Transcript with Google Gemini (Fastest & Most Accurate) ---
     const geminiKey = process.env.GEMINI_API_KEY;
 
-    if (geminiKey && directTranscript) {
-      const textParts = [
-        { text: systemInstruction },
-        { text: `User speech transcript: "${directTranscript}"` },
-      ];
+    // --- Provider 1: Google Gemini (Multimodal Audio & Transcript) ---
+    if (geminiKey) {
+      const parts = [{ text: systemInstruction }];
 
-      for (const modelName of GEMINI_MODELS) {
-        try {
-          responseText = await callGemini(modelName, geminiKey, textParts);
-          modelUsed = `Gemini (${modelName})`;
-          break;
-        } catch (err) {
-          console.warn(`[Echo AI] Gemini text attempt with ${modelName} failed (${err.status || err.message})`);
+      if (audioFile && audioFile.buffer && audioFile.buffer.length > 500) {
+        let cleanMime = (audioFile.mimetype || "audio/webm").split(";")[0].trim().toLowerCase();
+        if (!["audio/webm", "audio/mp3", "audio/wav", "audio/ogg", "audio/mp4", "audio/aac"].includes(cleanMime)) {
+          cleanMime = "audio/webm";
         }
-      }
-    }
 
-    // --- Provider 1B: Multimodal Audio with Google Gemini (if text not provided or failed) ---
-    if (!responseText && geminiKey && audioFile && audioFile.buffer && audioFile.buffer.length > 1000) {
-      let cleanMime = (audioFile.mimetype || "audio/webm").split(";")[0].trim().toLowerCase();
-      if (!["audio/webm", "audio/mp3", "audio/wav", "audio/ogg", "audio/mp4", "audio/aac"].includes(cleanMime)) {
-        cleanMime = "audio/webm";
-      }
-
-      const audioParts = [
-        { text: systemInstruction },
-        {
+        parts.push({
           inlineData: {
             mimeType: cleanMime,
             data: audioFile.buffer.toString("base64"),
           },
-        },
-      ];
+        });
 
-      if (directTranscript) {
-        audioParts.push({ text: `Transcript hint: "${directTranscript}"` });
+        if (directTranscript) {
+          parts.push({
+            text: `Browser speech preview reference (use to cross-check terminology and accuracy): "${directTranscript}"`,
+          });
+        } else {
+          parts.push({
+            text: "Transcribe the spoken audio above, extract all important points, decisions, and action items, and format as structured markdown note.",
+          });
+        }
+      } else if (directTranscript) {
+        parts.push({
+          text: `Spoken speech transcript to structure into a note:\n"${directTranscript}"`,
+        });
       }
 
       for (const modelName of GEMINI_MODELS) {
         try {
-          responseText = await callGemini(modelName, geminiKey, audioParts);
+          responseText = await callGemini(modelName, geminiKey, parts);
           modelUsed = `Gemini (${modelName})`;
+          console.info(`[Echo AI] Successfully processed speech using ${modelUsed}`);
           break;
         } catch (err) {
-          console.warn(`[Echo AI] Gemini audio attempt with ${modelName} failed (${err.status || err.message})`);
+          console.warn(`[Echo AI] Gemini attempt with ${modelName} notice: ${err.message}`);
         }
       }
     }
 
-    // --- Provider 2: Groq (Llama 3.3 70B - High Speed Alternative) ---
+    // --- Provider 2: Groq (Llama 3.3 70B Alternative) ---
     if (!responseText && directTranscript && process.env.GROQ_API_KEY) {
       try {
         responseText = await callGroq(process.env.GROQ_API_KEY, directTranscript);
@@ -328,12 +341,18 @@ OUTPUT FORMAT (Valid JSON):
       parsedResponse.title?.trim() ||
       (directTranscript ? directTranscript.slice(0, 35).replace(/[.,;!?]+$/, "") : "Voice Note");
 
-    // Ensure Blocks are NEVER empty
+    // Convert Cleaned Markdown into 100% compliant BlockNote-native blocks
     let finalBlocks = [];
-    if (Array.isArray(parsedResponse.blocks) && parsedResponse.blocks.length > 0) {
-      finalBlocks = parsedResponse.blocks;
-    } else if (parsedResponse.cleanedMarkdown) {
+    if (parsedResponse.cleanedMarkdown && parsedResponse.cleanedMarkdown.trim().length > 0) {
       finalBlocks = markdownToBlocks(parsedResponse.cleanedMarkdown);
+    } else if (Array.isArray(parsedResponse.blocks) && parsedResponse.blocks.length > 0) {
+      // Normalize any blocks
+      finalBlocks = parsedResponse.blocks.map((b) => {
+        if (typeof b.content === "string") {
+          return { ...b, content: [{ type: "text", text: b.content, styles: {} }] };
+        }
+        return b;
+      });
     } else {
       finalBlocks = localFormatSpeech(directTranscript).blocks;
     }
@@ -369,7 +388,7 @@ OUTPUT FORMAT (Valid JSON):
       rawTranscript: parsedResponse.rawTranscript || directTranscript || "",
       cleanedMarkdown: parsedResponse.cleanedMarkdown || "",
       blocks: finalBlocks,
-      modelUsed: modelUsed || "AI Model",
+      modelUsed: modelUsed || "Gemini AI",
     });
   } catch (error) {
     console.error("[Echo AI Top-Level Error]", error);
