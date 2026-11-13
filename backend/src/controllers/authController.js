@@ -93,15 +93,6 @@ export const register = async (req, res, next) => {
     });
 
     if (!emailResult.success) {
-      if (process.env.NODE_ENV !== "production") {
-        return res.status(201).json({
-          success: true,
-          requiresOtp: true,
-          email: cleanEmail,
-          devOtp: otp,
-          message: `Verification code generated. (SMTP Notice: ${emailResult.error})`,
-        });
-      }
       return res.status(500).json({
         success: false,
         message: "Failed to dispatch verification email. Please check your email address or try again shortly.",
@@ -242,13 +233,6 @@ export const resendOtp = async (req, res, next) => {
     });
 
     if (!emailResult.success) {
-      if (process.env.NODE_ENV !== "production") {
-        return res.status(200).json({
-          success: true,
-          devOtp: otp,
-          message: `A fresh 6-digit code has been generated. (SMTP Notice: ${emailResult.error})`,
-        });
-      }
       return res.status(500).json({
         success: false,
         message: "Failed to resend verification email. Please try again in a few moments.",
@@ -318,11 +302,17 @@ export const login = async (req, res, next) => {
         otp,
       });
 
+      if (!emailResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: "Unable to send verification email. Please try again shortly.",
+        });
+      }
+
       return res.status(403).json({
         success: false,
         requiresOtp: true,
         email: cleanEmail,
-        ...(process.env.NODE_ENV !== "production" && !emailResult.success ? { devOtp: otp } : {}),
         message: "Your email is not verified yet. We have sent a new 6-digit OTP to your email. Please check your inbox and spam folder.",
       });
     }

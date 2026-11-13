@@ -1,7 +1,5 @@
 import nodemailer from "nodemailer";
 
-let transporter = null;
-
 /**
  * Checks whether valid, non-placeholder SMTP credentials are configured
  */
@@ -14,82 +12,41 @@ export function isRealSmtpConfigured() {
   return true;
 }
 
-export function getTransporter() {
-  if (transporter) return transporter;
+/**
+ * Creates a fresh Nodemailer transporter with IPv4 forced to avoid cloud container DNS/IPv6 hangs
+ */
+function createTransporter(port = 465) {
+  const cleanPass = (process.env.SMTP_PASS || "").replace(/\s+/g, "");
+  const cleanUser = (process.env.SMTP_USER || "").trim();
+  const host = process.env.SMTP_HOST || "smtp.gmail.com";
 
-  // 1. Check for configured SMTP credentials
-  if (isRealSmtpConfigured()) {
-    const isGmail =
-      process.env.SMTP_SERVICE === "gmail" ||
-      (process.env.SMTP_HOST || "").toLowerCase().includes("gmail");
-
-    const cleanPass = (process.env.SMTP_PASS || "").replace(/\s+/g, "");
-    const cleanUser = process.env.SMTP_USER.trim();
-
-    // Use connection pooling to eliminate repeated handshakes and latency
-    transporter = nodemailer.createTransport(
-      isGmail
-        ? {
-            service: "gmail",
-            pool: true,
-            maxConnections: 5,
-            maxMessages: 100,
-            rateDelta: 1000,
-            rateLimit: 5,
-            connectionTimeout: 15000,
-            greetingTimeout: 15000,
-            socketTimeout: 20000,
-            auth: {
-              user: cleanUser,
-              pass: cleanPass,
-            },
-            tls: {
-              rejectUnauthorized: true,
-            },
-          }
-        : {
-            host: process.env.SMTP_HOST || "smtp.gmail.com",
-            port: Number(process.env.SMTP_PORT) || 587,
-            secure: Number(process.env.SMTP_PORT) === 465,
-            pool: true,
-            maxConnections: 5,
-            maxMessages: 100,
-            connectionTimeout: 15000,
-            greetingTimeout: 15000,
-            socketTimeout: 20000,
-            auth: {
-              user: cleanUser,
-              pass: cleanPass,
-            },
-            tls: {
-              rejectUnauthorized: true,
-            },
-          }
-    );
-
-    return transporter;
-  }
-
-  // 2. Fallback logger when SMTP credentials are not configured in environment
-  transporter = {
-    sendMail: async (options) => {
-      console.log("==================== [ECHO EMAIL LOG (DEV MOCK)] ====================");
-      console.log(`To: ${options.to}`);
-      console.log(`Subject: ${options.subject}`);
-      console.log(`Body:\n${options.text || options.html}`);
-      console.log("=====================================================================");
-      return { messageId: "console-mock-" + Date.now() };
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: {
+      user: cleanUser,
+      pass: cleanPass,
     },
-  };
-
-  return transporter;
+    family: 4, // Force IPv4 to prevent hanging on cloud hosts (Render / Docker)
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
 }
 
 /**
- * Sends a stylized 6-digit OTP verification email with resilient timeout and retry
+ * Sends a stylized 6-digit OTP verification email via SMTP with dual-port fallback (465 -> 587)
  */
 export async function sendOtpEmail({ to, name = "Echo User", otp }) {
-  const mailTransporter = getTransporter();
+  if (!isRealSmtpConfigured()) {
+    console.warn(`[Echo Mail Notice] Real SMTP not configured in environment. Cannot dispatch email to ${to}.`);
+    return { success: false, error: "SMTP credentials not configured" };
+  }
+
   const senderEmail = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : "no-reply@echo-notes.ai";
 
   const htmlContent = `
@@ -146,19 +103,24 @@ export async function sendOtpEmail({ to, name = "Echo User", otp }) {
     },
   };
 
+  // Primary Attempt: Port 465 (Direct SSL)
   try {
-    // 25-second timeout guard to ensure network/DNS handshakes can complete reliably without hanging
-    const sendPromise = mailTransporter.sendMail(mailOptions);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Email dispatch timed out after 25s")), 25000)
-    );
-
-    const info = await Promise.race([sendPromise, timeoutPromise]);
-    console.info(`[Echo Mail] Verification OTP email dispatched to ${to} (MessageId: ${info.messageId || "mock"})`);
+    const transporter465 = createTransporter(465);
+    const info = await transporter465.sendMail(mailOptions);
+    console.info(`[Echo Mail] Verification OTP email dispatched to ${to} via port 465 (MessageId: ${info.messageId})`);
     return { success: true, messageId: info.messageId };
-  } catch (err) {
-    console.error(`[Echo Mail Error] Dispatch to ${to} failed: ${err.message}`);
-    console.log(`[Echo Mail Fallback] User: ${to} | Verification OTP: ${otp}`);
-    return { success: false, error: err.message, devOtp: otp };
+  } catch (err465) {
+    console.warn(`[Echo Mail Notice] Port 465 attempt to ${to} failed: ${err465.message}. Retrying via port 587...`);
+
+    // Fallback Attempt: Port 587 (STARTTLS)
+    try {
+      const transporter587 = createTransporter(587);
+      const info = await transporter587.sendMail(mailOptions);
+      console.info(`[Echo Mail] Verification OTP email dispatched to ${to} via port 587 (MessageId: ${info.messageId})`);
+      return { success: true, messageId: info.messageId };
+    } catch (err587) {
+      console.error(`[Echo Mail Error] All email dispatch attempts to ${to} failed: ${err587.message}`);
+      return { success: false, error: err587.message };
+    }
   }
 }

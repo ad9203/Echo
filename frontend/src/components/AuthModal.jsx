@@ -95,8 +95,7 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
           setOtpTimer(60);
           setCanResend(false);
           setOtpDigits(["", "", "", "", "", ""]);
-          const devHint = res?.devOtp ? ` (Dev Code: ${res.devOtp})` : "";
-          setSuccessMsg(`We sent a 6-digit verification code to ${email}${devHint}`);
+          setSuccessMsg(`We sent a 6-digit verification code to ${email}`);
           setTimeout(() => otpInputsRef.current[0]?.focus(), 150);
         } else {
           setSuccessMsg("Welcome! Account created successfully.");
@@ -121,8 +120,7 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
           setOtpTimer(60);
           setCanResend(false);
           setOtpDigits(["", "", "", "", "", ""]);
-          const devHint = err.data?.devOtp ? ` (Dev Code: ${err.data.devOtp})` : "";
-          setSuccessMsg(`Please verify your email. A fresh 6-digit code has been sent.${devHint}`);
+          setSuccessMsg("Please check your email. We sent a 6-digit verification code to complete your login.");
           setTimeout(() => otpInputsRef.current[0]?.focus(), 150);
         } else {
           setErrorMsg(err.message || "Invalid email or password.");
@@ -198,11 +196,10 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
     setIsSubmitting(true);
 
     try {
-      const res = await resendOtp(email);
+      await resendOtp(email);
       setOtpTimer(60);
       setCanResend(false);
-      const devHint = res?.devOtp ? ` (Dev Code: ${res.devOtp})` : "";
-      setSuccessMsg(`A new code was sent to ${email}${devHint}`);
+      setSuccessMsg(`A fresh 6-digit verification code was sent to ${email}`);
     } catch (err) {
       setErrorMsg(err.message || "Failed to resend code.");
     } finally {
