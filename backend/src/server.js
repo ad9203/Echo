@@ -1,5 +1,7 @@
 import express from "express";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import compression from "compression";
@@ -8,7 +10,11 @@ import { errorHandler } from "./middleware/error.js";
 import authRoutes from "./routes/authRoutes.js";
 import noteRoutes from "./routes/noteRoutes.js";
 
-// Load environment variables
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load environment variables reliably from backend or root directory
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 dotenv.config();
 
 // Connect to MongoDB

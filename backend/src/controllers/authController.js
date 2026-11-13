@@ -2,7 +2,7 @@ import crypto from "crypto";
 import User from "../models/User.js";
 import { sendTokenResponse } from "../utils/sendToken.js";
 import { validatePassword } from "../utils/passwordValidator.js";
-import { sendOtpEmail } from "../utils/sendEmail.js";
+import { sendOtpEmail, isRealSmtpConfigured } from "../utils/sendEmail.js";
 
 // Helper: Generate secure 6-digit OTP
 function generate6DigitOtp() {
@@ -74,7 +74,7 @@ export const register = async (req, res, next) => {
       });
     }
 
-    const hasSmtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+    const hasSmtpConfigured = isRealSmtpConfigured();
 
     // If no real SMTP service configured in .env, auto-verify user immediately
     if (!hasSmtpConfigured) {
@@ -86,17 +86,33 @@ export const register = async (req, res, next) => {
     }
 
     // Send verification email via Nodemailer
-    await sendOtpEmail({
+    const emailResult = await sendOtpEmail({
       to: cleanEmail,
       name: existingUser.name,
       otp,
     });
 
+    if (!emailResult.success) {
+      if (process.env.NODE_ENV !== "production") {
+        return res.status(201).json({
+          success: true,
+          requiresOtp: true,
+          email: cleanEmail,
+          devOtp: otp,
+          message: `Verification code generated. (SMTP Notice: ${emailResult.error})`,
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        message: "Failed to dispatch verification email. Please check your email address or try again shortly.",
+      });
+    }
+
     return res.status(201).json({
       success: true,
       requiresOtp: true,
       email: cleanEmail,
-      message: `A 6-digit verification code has been sent to ${cleanEmail}. Please enter it to complete registration.`,
+      message: `A 6-digit verification code has been sent to ${cleanEmail}. Please check your inbox and spam folder.`,
     });
   } catch (error) {
     if (error.code === 11000) {
@@ -124,7 +140,7 @@ export const verifyOtp = async (req, res, next) => {
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const cleanOtp = otp.toString().trim();
+    const cleanOtp = otp.toString().replace(/\s+/g, "");
 
     const user = await User.findOne({ email: cleanEmail }).select("+otp +otpExpires");
 
@@ -205,20 +221,43 @@ export const resendOtp = async (req, res, next) => {
       });
     }
 
+    const hasSmtp = isRealSmtpConfigured();
+    if (!hasSmtp) {
+      user.isVerified = true;
+      user.otp = undefined;
+      user.otpExpires = undefined;
+      await user.save();
+      return sendTokenResponse(user, 200, res);
+    }
+
     const otp = generate6DigitOtp();
     user.otp = otp;
     user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    await sendOtpEmail({
+    const emailResult = await sendOtpEmail({
       to: cleanEmail,
       name: user.name,
       otp,
     });
 
+    if (!emailResult.success) {
+      if (process.env.NODE_ENV !== "production") {
+        return res.status(200).json({
+          success: true,
+          devOtp: otp,
+          message: `A fresh 6-digit code has been generated. (SMTP Notice: ${emailResult.error})`,
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        message: "Failed to resend verification email. Please try again in a few moments.",
+      });
+    }
+
     res.status(200).json({
       success: true,
-      message: `A fresh 6-digit code has been sent to ${cleanEmail}.`,
+      message: `A fresh 6-digit code has been sent to ${cleanEmail}. Please check your inbox and spam folder.`,
     });
   } catch (error) {
     next(error);
@@ -259,7 +298,7 @@ export const login = async (req, res, next) => {
 
     // If user has not verified their email via OTP yet
     if (!user.isVerified) {
-      const hasSmtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+      const hasSmtpConfigured = isRealSmtpConfigured();
       if (!hasSmtpConfigured) {
         user.isVerified = true;
         user.otp = undefined;
@@ -273,7 +312,7 @@ export const login = async (req, res, next) => {
       user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
       await user.save();
 
-      await sendOtpEmail({
+      const emailResult = await sendOtpEmail({
         to: cleanEmail,
         name: user.name,
         otp,
@@ -283,7 +322,8 @@ export const login = async (req, res, next) => {
         success: false,
         requiresOtp: true,
         email: cleanEmail,
-        message: "Your email is not verified yet. We have sent a new 6-digit OTP to your email.",
+        ...(process.env.NODE_ENV !== "production" && !emailResult.success ? { devOtp: otp } : {}),
+        message: "Your email is not verified yet. We have sent a new 6-digit OTP to your email. Please check your inbox and spam folder.",
       });
     }
 

@@ -95,7 +95,8 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
           setOtpTimer(60);
           setCanResend(false);
           setOtpDigits(["", "", "", "", "", ""]);
-          setSuccessMsg(`We sent a 6-digit verification code to ${email}`);
+          const devHint = res?.devOtp ? ` (Dev Code: ${res.devOtp})` : "";
+          setSuccessMsg(`We sent a 6-digit verification code to ${email}${devHint}`);
           setTimeout(() => otpInputsRef.current[0]?.focus(), 150);
         } else {
           setSuccessMsg("Welcome! Account created successfully.");
@@ -120,7 +121,8 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
           setOtpTimer(60);
           setCanResend(false);
           setOtpDigits(["", "", "", "", "", ""]);
-          setSuccessMsg("Please verify your email. A fresh 6-digit code has been sent.");
+          const devHint = err.data?.devOtp ? ` (Dev Code: ${err.data.devOtp})` : "";
+          setSuccessMsg(`Please verify your email. A fresh 6-digit code has been sent.${devHint}`);
           setTimeout(() => otpInputsRef.current[0]?.focus(), 150);
         } else {
           setErrorMsg(err.message || "Invalid email or password.");
@@ -196,10 +198,11 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
     setIsSubmitting(true);
 
     try {
-      await resendOtp(email);
+      const res = await resendOtp(email);
       setOtpTimer(60);
       setCanResend(false);
-      setSuccessMsg(`A new code was sent to ${email}`);
+      const devHint = res?.devOtp ? ` (Dev Code: ${res.devOtp})` : "";
+      setSuccessMsg(`A new code was sent to ${email}${devHint}`);
     } catch (err) {
       setErrorMsg(err.message || "Failed to resend code.");
     } finally {
@@ -365,6 +368,10 @@ const AuthModal = ({ isOpen, onClose, initialMode = "login", onLogout }) => {
                 <span>Verify & Launch Workspace</span>
                 <ArrowRight size={16} />
               </button>
+
+              <p className="text-[11px] text-center text-slate-400 dark:text-slate-500 pt-1">
+                Can't find the email? Please check your <strong>Spam</strong> or <strong>Promotions</strong> folder.
+              </p>
             </form>
 
             <div className="text-center pt-2">
